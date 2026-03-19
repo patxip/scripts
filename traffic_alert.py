@@ -19,6 +19,8 @@ Variables de entorno (pueden sobreescribir los valores por defecto del script):
   ORIGIN_LON              Longitud origen
   DEST_LAT                Latitud destino
   DEST_LON                Longitud destino
+  WAYPOINT_LAT            Latitud punto intermedio (opcional)
+  WAYPOINT_LON            Longitud punto intermedio (opcional)
   API_KEY                 Clave de la API (Google o TomTom)
   PROVIDER                "google" | "tomtom"
   DELAY_THRESHOLD_MINUTES Minutos de retraso a partir de los cuales se alerta (por defecto: 10)
@@ -55,6 +57,8 @@ DEFAULT_ORIGIN_LAT: float = 40.453054          # Ejemplo: oficina en Madrid
 DEFAULT_ORIGIN_LON: float = -3.688344
 DEFAULT_DEST_LAT: float = 40.416775            # Ejemplo: casa en Madrid
 DEFAULT_DEST_LON: float = -3.703790
+DEFAULT_WAYPOINT_LAT: Optional[float] = None   # Punto intermedio opcional
+DEFAULT_WAYPOINT_LON: Optional[float] = None
 DEFAULT_API_KEY: str = ""                      # Obligatorio: pon tu clave aquí o en env
 DEFAULT_PROVIDER: Literal["google", "tomtom"] = "google"
 DEFAULT_DELAY_THRESHOLD_MINUTES: int = 10
@@ -73,6 +77,8 @@ class Config:
     origin_lon: float
     dest_lat: float
     dest_lon: float
+    waypoint_lat: Optional[float]
+    waypoint_lon: Optional[float]
     api_key: str
     provider: Provider
     delay_threshold_minutes: int
@@ -123,11 +129,19 @@ def load_config() -> Config:
     if not api_key:
         _die("API_KEY no configurada. Defínela como variable de entorno o en el script.")
 
+    # Waypoint: ambas coordenadas deben estar presentes o ninguna
+    waypoint_lat = _get_float("WAYPOINT_LAT", DEFAULT_WAYPOINT_LAT) if os.environ.get("WAYPOINT_LAT") or DEFAULT_WAYPOINT_LAT is not None else None
+    waypoint_lon = _get_float("WAYPOINT_LON", DEFAULT_WAYPOINT_LON) if os.environ.get("WAYPOINT_LON") or DEFAULT_WAYPOINT_LON is not None else None
+    if (waypoint_lat is None) != (waypoint_lon is None):
+        _die("WAYPOINT_LAT y WAYPOINT_LON deben definirse juntos o no definirse ninguno.")
+
     return Config(
         origin_lat=_get_float("ORIGIN_LAT", DEFAULT_ORIGIN_LAT),
         origin_lon=_get_float("ORIGIN_LON", DEFAULT_ORIGIN_LON),
         dest_lat=_get_float("DEST_LAT", DEFAULT_DEST_LAT),
         dest_lon=_get_float("DEST_LON", DEFAULT_DEST_LON),
+        waypoint_lat=waypoint_lat,
+        waypoint_lon=waypoint_lon,
         api_key=api_key,
         provider=provider_raw,  # type: ignore[arg-type]
         delay_threshold_minutes=_get_int("DELAY_THRESHOLD_MINUTES", DEFAULT_DELAY_THRESHOLD_MINUTES),
@@ -171,6 +185,15 @@ def fetch_google(cfg: Config) -> TrafficResult:
         "routingPreference": "TRAFFIC_AWARE",   # activa el tráfico en tiempo real
         "computeAlternativeRoutes": False,
     }
+
+    if cfg.waypoint_lat is not None and cfg.waypoint_lon is not None:
+        payload["intermediates"] = [
+            {
+                "location": {
+                    "latLng": {"latitude": cfg.waypoint_lat, "longitude": cfg.waypoint_lon}
+                }
+            }
+        ]
 
     try:
         resp = requests.post(GOOGLE_ROUTES_URL, json=payload, headers=headers, timeout=10)
@@ -230,7 +253,17 @@ def fetch_tomtom(cfg: Config) -> TrafficResult:
 
     origin = f"{cfg.origin_lat},{cfg.origin_lon}"
     destination = f"{cfg.dest_lat},{cfg.dest_lon}"
-    url = TOMTOM_ROUTING_URL.format(origin=origin, destination=destination)
+
+    if cfg.waypoint_lat is not None and cfg.waypoint_lon is not None:
+        waypoint = f"{cfg.waypoint_lat},{cfg.waypoint_lon}"
+        # TomTom: los waypoints van entre origen y destino separados por ':'
+        route_points = f"{origin}:{waypoint}:{destination}"
+    else:
+        route_points = f"{origin}:{destination}"
+
+    url = TOMTOM_ROUTING_URL.format(origin=origin, destination=destination).replace(
+        f"{origin}:{destination}", route_points
+    )
 
     params = {
         "key": cfg.api_key,
@@ -296,7 +329,11 @@ def _build_result(
     # Construir mensaje legible
     origin_label = f"{cfg.origin_lat},{cfg.origin_lon}"
     dest_label = f"{cfg.dest_lat},{cfg.dest_lon}"
-    prefix = f"Tráfico {origin_label}→{dest_label}"
+    if cfg.waypoint_lat is not None and cfg.waypoint_lon is not None:
+        waypoint_label = f"{cfg.waypoint_lat},{cfg.waypoint_lon}"
+        prefix = f"Tráfico {origin_label}→{waypoint_label}→{dest_label}"
+    else:
+        prefix = f"Tráfico {origin_label}→{dest_label}"
 
     if duration_base_min is not None and delay_min is not None:
         sign = "+" if delay_min >= 0 else ""
@@ -392,6 +429,8 @@ if __name__ == "__main__":
 #    export ORIGIN_LON="-3.688344"
 #    export DEST_LAT="40.416775"
 #    export DEST_LON="-3.703790"
+#    export WAYPOINT_LAT="40.435000"   # opcional: punto intermedio (ej: salida A-6)
+#    export WAYPOINT_LON="-3.695000"
 #    export DELAY_THRESHOLD_MINUTES="10"
 #    python3 traffic_alert.py
 #
