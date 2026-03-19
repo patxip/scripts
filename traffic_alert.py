@@ -43,7 +43,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass, asdict
-from typing import Literal
+from typing import Literal, Optional
 
 import requests
 
@@ -84,8 +84,8 @@ class TrafficResult:
     origin: str
     destination: str
     duration_now_min: int          # Tiempo actual con tráfico (minutos)
-    duration_base_min: int | None  # Tiempo base sin tráfico (minutos, si disponible)
-    delay_min: int | None          # Diferencia en minutos (now - base)
+    duration_base_min: Optional[int]  # Tiempo base sin tráfico (minutos, si disponible)
+    delay_min: Optional[int]          # Diferencia en minutos (now - base)
     status: Status                 # "OK" o "ALERTA"
     summary: str                   # Línea de texto lista para Telegram
 
@@ -199,7 +199,7 @@ def fetch_google(cfg: Config) -> TrafficResult:
     return _build_result(cfg, "google", duration_now_min, duration_base_min)
 
 
-def _parse_google_duration(value: str) -> int | None:
+def _parse_google_duration(value: str) -> Optional[int]:
     """Convierte la cadena de duración de Google ('123s') a segundos enteros."""
     if not value:
         return None
@@ -260,7 +260,7 @@ def fetch_tomtom(cfg: Config) -> TrafficResult:
     duration_now_sec: int = summary.get("travelTimeInSeconds", 0)
 
     # Preferimos noTrafficTravelTimeInSeconds; si no existe, usamos historicTrafficTravelTimeInSeconds
-    duration_base_sec: int | None = (
+    duration_base_sec: Optional[int] = (
         summary.get("noTrafficTravelTimeInSeconds")
         or summary.get("historicTrafficTravelTimeInSeconds")
     )
@@ -279,11 +279,11 @@ def _build_result(
     cfg: Config,
     provider: str,
     duration_now_min: int,
-    duration_base_min: int | None,
+    duration_base_min: Optional[int],
 ) -> TrafficResult:
     """Calcula la diferencia, el estado y construye el mensaje de resumen."""
 
-    delay_min: int | None = None
+    delay_min: Optional[int] = None
     if duration_base_min is not None:
         delay_min = duration_now_min - duration_base_min
 
@@ -332,7 +332,7 @@ def _build_result(
 # Utilidades
 # ---------------------------------------------------------------------------
 
-def _sec_to_min(seconds: int | None) -> int | None:
+def _sec_to_min(seconds: Optional[int]) -> Optional[int]:
     """Convierte segundos a minutos redondeando al entero más cercano."""
     if seconds is None:
         return None
