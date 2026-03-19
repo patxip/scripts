@@ -14,6 +14,12 @@ Salida:
 Uso:
   python3 traffic_alert.py
 
+Configuración mediante fichero .env (opcional):
+  Crea un fichero ".env" en el mismo directorio que el script con el formato:
+    API_KEY=tu_clave_aqui
+    ORIGIN_LAT=40.453054
+  Las variables de entorno del sistema tienen prioridad sobre el .env.
+
 Variables de entorno (pueden sobreescribir los valores por defecto del script):
   ORIGIN_LAT              Latitud origen
   ORIGIN_LON              Longitud origen
@@ -48,6 +54,33 @@ from dataclasses import dataclass, asdict
 from typing import Literal, Optional
 
 import requests
+
+
+# ---------------------------------------------------------------------------
+# Carga de .env (si existe) — las variables de entorno ya definidas tienen
+# prioridad; el .env solo rellena las que faltan.
+# ---------------------------------------------------------------------------
+
+def _load_dotenv(path: str = ".env") -> None:
+    """Lee un fichero .env y aplica las variables que aún no estén en el entorno."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except FileNotFoundError:
+        pass  # .env opcional; no es un error
+
+
+_load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Configuración por defecto — sobreescribible mediante variables de entorno
